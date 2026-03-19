@@ -1,0 +1,32 @@
+{
+  "default": {
+    "motion_tokens": "cinematic video, natural head movement, expressive face, blinking, talking to camera, high quality motion",
+    "char_desc": "preserving strong facial identity, keeping the exact same face, hair, and glasses from the image",
+    "voice_desc": "a mature Indian English male voice with a calm professional tone"
+  },
+  "default_female": {
+    "motion_tokens": "cinematic video, natural head movement, expressive face, blinking, talking to camera, high quality motion",
+    "char_desc": "preserving strong facial identity and natural feminine features",
+    "voice_desc": "a mature Indian English female voice with a warm, professional tone"
+  },
+  "kid": {
+    "motion_tokens": "cinematic video, natural head movement, expressive face, blinking, talking to camera, high quality motion, playful child expressions, enthusiastic facial movement",
+    "char_desc": "preserving strong facial identity, keeping the exact same face from the image",
+    "voice_desc": "a young Indian child's energetic, high-pitched voice, clear speech"
+  },
+  "kid_hindi": {
+    "motion_tokens": "cinematic video, natural head movement, expressive face, blinking, talking to camera, high quality motion, playful child expressions, enthusiastic facial movement",
+    "char_desc": "preserving strong facial identity, keeping the exact same face from the image",
+    "voice_desc": "a young Hindi-speaking child's voice, natural Indian accent"
+  },
+  "hindi_male": {
+    "motion_tokens": "cinematic video, natural head movement, expressive face, blinking, talking to camera, high quality motion",
+    "char_desc": "preserving strong facial identity, keeping the exact same face from the image",
+    "voice_desc": "a natural Hindi-speaking male voice, expressive tone"
+  },
+  "hindi_female": {
+    "motion_tokens": "cinematic video, natural head movement, expressive face, blinking, talking to camera, high quality motion",
+    "char_desc": "preserving strong facial identity and natural feminine features",
+    "voice_desc": "a natural Hindi-speaking female voice, warm expressive tone"
+  }
+}

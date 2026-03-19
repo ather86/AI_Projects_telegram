@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build / temp
+build/
+dist/
+*.tmp
+
+# Local outputs / artifacts
+output/
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.png
+*.jpg
+*.jpeg
+*.wav
+*.mp3
+
+# Keep workflow definitions tracked
+!workflow_api/
+!workflow_api/*.json
