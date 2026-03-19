@@ -22,6 +22,30 @@ from telegram.error import BadRequest, TimedOut, NetworkError
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters, CallbackQueryHandler
 import video_processor
 
+
+def load_local_env_file(env_path: str) -> None:
+    """Load simple KEY=VALUE pairs from a local .env file into process env."""
+    if not os.path.exists(env_path):
+        return
+
+    try:
+        with open(env_path, "r", encoding="utf-8") as env_file:
+            for raw_line in env_file:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except Exception as error:
+        logging.warning(f"Failed to load .env file at {env_path}: {error}")
+
+
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+load_local_env_file(os.path.join(PROJECT_DIR, ".env"))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -40,7 +64,7 @@ logging.getLogger("websocket").setLevel(logging.WARNING)
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 COMFY_URL = os.getenv("COMFY_URL", "http://127.0.0.1:8188").strip()
 COMFY_WS_URL = f"ws://{COMFY_URL.split('//')[1]}/ws"
-WORKFLOW_API_PATH = os.getenv("WORKFLOW_API_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "workflow_api"))
+WORKFLOW_API_PATH = os.getenv("WORKFLOW_API_PATH", os.path.join(PROJECT_DIR, "workflow_api"))
 COMFY_INPUT_PATH = os.getenv("COMFY_INPUT_PATH", r"D:\StabilityMatrix-win-x64\Data\Packages\ComfyUI\input")
 COMFY_OUTPUT_PATH = os.getenv("COMFY_OUTPUT_PATH", r"D:\StabilityMatrix-win-x64\Data\Packages\ComfyUI\output\video")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3").strip()
@@ -315,6 +339,30 @@ def ensure_audio_dialogue_suffix(scene_prompt: str, fallback_text: str, force_fa
     dialogue = sanitize_audio_dialogue(extracted_dialogue if extracted_dialogue else fallback)
     visual = scene_text.strip() if scene_text.strip() else "cinematic talking-head shot"
     return f"{visual}. Audio Dialogue: {dialogue}"
+
+
+def build_manual_scene_prompt(scene_visual: str, scene_dialogue: str) -> str:
+    """Build manual-mode prompt with dialogue first to avoid truncation losing speech text."""
+    dialogue = sanitize_audio_dialogue(scene_dialogue)
+    visual = re.sub(r"\s+", " ", (scene_visual or "").strip())
+
+    # Remove embedded quoted speech from visual block to avoid confusion/repetition.
+    visual = re.sub(r'"[^"]{3,}"', "", visual)
+    visual = re.sub(r"“[^”]{3,}”", "", visual)
+    visual = re.sub(r"\s+", " ", visual).strip(" .")
+
+    # Keep visual direction concise so dialogue remains within early tokens.
+    if len(visual) > 260:
+        visual = visual[:260].rsplit(" ", 1)[0].strip(" .")
+
+    if not visual:
+        visual = "cinematic talking-head framing with natural motion"
+
+    return (
+        f"Audio Dialogue: {dialogue}. "
+        f"Visual Direction: {visual}. "
+        "Single speaker only. Natural lip sync."
+    )
 
 
 def _split_script_into_dialogue_chunks(script_text: str, target_chunks: int) -> list[str]:
@@ -947,11 +995,7 @@ async def run_story_generation(update: Update, context: ContextTypes.DEFAULT_TYP
             if not scene_prompt:
                 scene_prompt = prompt_text
             manual_dialogue = (scene.get("manual_dialogue") or "").strip()
-            scene_prompt = ensure_audio_dialogue_suffix(
-                scene_prompt,
-                manual_dialogue or scene_prompt,
-                force_fallback_dialogue=True,
-            )
+            scene_prompt = build_manual_scene_prompt(scene_prompt, manual_dialogue or scene_prompt)
         elif mode == "hybrid":
             scene_visual = (scene.get("visual_prompt") or scene.get("description") or prompt_text).strip()
             scene_dialogue = (scene.get("dialogue_text") or "").strip()
