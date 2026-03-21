@@ -269,8 +269,7 @@ def stitch_videos(video_files, output_path, upscale_resolution=None):
                 "-c:v", "libx264",
                 "-preset", "slow",
                 "-crf", "22",
-                "-c:a", "aac",
-                "-b:a", "192k",
+                "-c:a", "copy",  # Copy audio stream without re-encoding
                 upscaled_output_path
             ]
             subprocess.run(upscale_cmd, check=True, capture_output=True, text=True)
@@ -291,3 +290,25 @@ def stitch_videos(video_files, output_path, upscale_resolution=None):
         # Clean up the temporary list file
         if os.path.exists(list_file_path):
             os.remove(list_file_path)
+
+def upscale_video(input_path, output_path, height=2160):
+    """Upscales a video to the specified height using ffmpeg, ensuring even dimensions."""
+    logging.info(f"Upscaling video to {height} at {output_path}")
+    command = [
+        "ffmpeg",
+        "-i",
+        input_path,
+        "-vf",
+        f"scale='trunc(oh*a/2)*2':{height}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "slow",
+        "-crf",
+        "22",
+        "-c:a",
+        "copy",  # Copy audio stream without re-encoding
+        output_path,
+    ]
+    subprocess.run(command, check=True, capture_output=True, text=True)
+    logging.info(f"Successfully upscaled video to {output_path}")

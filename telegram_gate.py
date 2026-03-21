@@ -20,7 +20,59 @@ from pynvml import *
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest, TimedOut, NetworkError
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters, CallbackQueryHandler
+from flask import Flask, request, jsonify
 import video_processor
+
+# --- Flask App for Trading Alerts ---
+flask_app = Flask(__name__)
+
+async def send_trading_alert_async(app, chat_id, title, message):
+    """Asynchronously sends a message using the bot application."""
+    try:
+        await app.bot.send_message(chat_id=chat_id, text=f"*{title}*\n\n{message}", parse_mode='Markdown')
+        logging.info(f"Successfully sent trading alert to chat {chat_id}.")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to send trading alert to {chat_id}: {e}")
+        return False
+
+@flask_app.route('/send_alert', methods=['POST'])
+def receive_alert():
+    data = request.json
+    title = data.get('title')
+    message = data.get('message')
+    ticker = data.get('ticker')
+    
+    if not all([title, message, ticker]):
+        return jsonify({"status": "error", "message": "Missing title, message, or ticker"}), 400
+
+    if not TRADING_CHAT_ID:
+        logging.error("TRADING_CHAT_ID is not set. Cannot send alert.")
+        return jsonify({"status": "error", "message": "Trading chat ID not configured on server"}), 500
+
+    # The magic happens here: we run the async function in the main event loop
+    if 'bot_app' in flask_app.config:
+        bot_app = flask_app.config['bot_app']
+        asyncio.run_coroutine_threadsafe(
+            send_trading_alert_async(bot_app, TRADING_CHAT_ID, title, message),
+            bot_app.loop
+        )
+        return jsonify({"status": "success", "message": "Alert queued for sending"}), 202
+    else:
+        logging.error("Bot application not found in Flask config.")
+        return jsonify({"status": "error", "message": "Bot not initialized"}), 500
+
+
+def run_flask_app(bot_app):
+    """Run the Flask app in a separate thread."""
+    flask_app.config['bot_app'] = bot_app
+    flask_thread = threading.Thread(target=lambda: flask_app.run(port=5001, debug=False, use_reloader=False))
+    flask_thread.daemon = True
+    flask_thread.start()
+    logging.info("Flask alert receiver is running in a background thread.")
+
+
+# --- End Flask App ---
 
 
 def load_local_env_file(env_path: str) -> None:
@@ -62,13 +114,14 @@ logging.getLogger("websocket").setLevel(logging.WARNING)
 
 # --- 1. CONFIGURATION ---
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+TRADING_CHAT_ID = os.getenv("TRADING_CHAT_ID", "").strip() # New ID for the trading channel
 COMFY_URL = os.getenv("COMFY_URL", "http://127.0.0.1:8188").strip()
 COMFY_WS_URL = f"ws://{COMFY_URL.split('//')[1]}/ws"
 WORKFLOW_API_PATH = os.getenv("WORKFLOW_API_PATH", os.path.join(PROJECT_DIR, "workflow_api"))
 COMFY_INPUT_PATH = os.getenv("COMFY_INPUT_PATH", r"D:\StabilityMatrix-win-x64\Data\Packages\ComfyUI\input")
 COMFY_OUTPUT_PATH = os.getenv("COMFY_OUTPUT_PATH", r"D:\StabilityMatrix-win-x64\Data\Packages\ComfyUI\output\video")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3").strip()
-OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "llava").strip()
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:32b").strip()
+OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "llama3.2-vision:latest").strip()
 
 admin_chat_raw = os.getenv("ADMIN_CHAT_ID", "")
 ADMIN_CHAT_ID = int(admin_chat_raw) if admin_chat_raw.isdigit() else None
@@ -376,6 +429,31 @@ def _split_script_into_dialogue_chunks(script_text: str, target_chunks: int) -> 
         sentences = [cleaned]
 
     target_chunks = max(1, target_chunks)
+
+    # If sentence count is lower than required chunks (e.g., one long sentence),
+    # split by words to avoid repeating identical dialogue across scenes.
+    if len(sentences) < target_chunks:
+        words = cleaned.split()
+        if not words:
+            return ["Hello from Bengaluru."] * target_chunks
+
+        chunks: list[str] = []
+        total_words = len(words)
+        for index in range(target_chunks):
+            start = int(index * total_words / target_chunks)
+            end = int((index + 1) * total_words / target_chunks)
+            if start >= end:
+                end = min(total_words, start + 1)
+
+            chunk_words = words[start:end]
+            if not chunk_words:
+                chunk_words = [words[min(start, total_words - 1)]]
+
+            chunk = " ".join(chunk_words).strip()
+            chunks.append(sanitize_audio_dialogue(chunk))
+
+        return chunks
+
     chunks: list[str] = []
     total = len(sentences)
 
