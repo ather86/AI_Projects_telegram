@@ -149,6 +149,7 @@ COMFY_PROGRESS_STATE = {}
 LAST_QUEUE_REMAINING = None
 
 WIZARD_STEPS = {
+    "workflow": "workflow",
     "image": "image",
     "prompt": "prompt",
     "mode": "mode",
@@ -800,6 +801,7 @@ def get_workflow_path(context: ContextTypes.DEFAULT_TYPE) -> tuple[str, str]:
     return workflow_filename, workflow_path
 
 
+
 def extract_last_frame_to_input(video_path: str, output_image_path: str) -> bool:
     try:
         probe = subprocess.run(
@@ -1152,14 +1154,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def begin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pipeline_id = f"pl_{update.effective_user.id}_{int(time.time())}"
     context.user_data["wizard_active"] = True
-    context.user_data["wizard_step"] = WIZARD_STEPS["image"]
+    context.user_data["wizard_step"] = WIZARD_STEPS["workflow"]
     context.user_data["wizard_data"] = {"pipeline_id": pipeline_id}
-    await update.message.reply_text(
-        "🎬 Wizard started.\n"
-        f"Pipeline ID: `{pipeline_id}`\n"
-        "Step 1/5: Please upload the reference image.",
-        parse_mode="Markdown",
-    )
+
+    try:
+        files = sorted([name for name in os.listdir(WORKFLOW_API_PATH) if name.endswith(".json")])
+        if not files:
+            await update.message.reply_text("❌ No workflows found in workflow_api.")
+            reset_wizard_state(context)
+            return
+
+        keyboard = [[InlineKeyboardButton(os.path.splitext(name)[0], callback_data=f"wizard_workflow_{name}")] for name in files]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "🎬 Wizard started.\n"
+            f"Pipeline ID: `{pipeline_id}`\n"
+            "Step 1: Please select a workflow.",
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+        )
+    except Exception as error:
+        await update.message.reply_text(f"❌ Error starting wizard: {error}")
+        reset_wizard_state(context)
 
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1235,7 +1251,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         wizard_data["prompt"] = text
         context.user_data["wizard_step"] = WIZARD_STEPS["mode"]
         await update.message.reply_text(
-            "Step 3/5: Choose mode by sending one word: `auto`, `manual`, or `hybrid`",
+            "Step 4/6: Choose mode by sending one word: `auto`, `manual`, or `hybrid`",
             parse_mode="Markdown",
         )
         return
@@ -1247,7 +1263,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         wizard_data["mode"] = selected_mode
         context.user_data["wizard_step"] = WIZARD_STEPS["duration"]
-        await update.message.reply_text("Step 4/5: Enter video duration in seconds (e.g., 36, 60, 120).")
+        await update.message.reply_text("Step 5/6: Enter video duration in seconds (e.g., 36, 60, 120).")
         return
 
     if step == WIZARD_STEPS["duration"]:
@@ -1262,7 +1278,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         wizard_data["duration"] = duration
         context.user_data["wizard_step"] = WIZARD_STEPS["quality"]
         await update.message.reply_text(
-            "Step 5/5: Choose output quality: `no` (no upscale), `2k`, or `4k`",
+            "Step 6/6: Choose output quality: `no` (no upscale), `2k`, or `4k`",
             parse_mode="Markdown",
         )
         return
@@ -1279,7 +1295,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reset_wizard_state(context)
         return
 
-    await update.message.reply_text("Step 2/5: Send your story/script prompt text.")
+    await update.message.reply_text("Step 3/6: Send your story/script prompt text.")
 
 
 # --- 4. COMMAND HANDLERS ---
@@ -1308,6 +1324,32 @@ async def workflow_button_callback(update: Update, context: ContextTypes.DEFAULT
     workflow_filename = query.data.split("workflow_", 1)[1]
     context.user_data["workflow_file"] = workflow_filename
     await query.edit_message_text(text=f"✅ Workflow selected: `{workflow_filename}`", parse_mode="Markdown")
+
+
+async def wizard_workflow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle workflow selection during wizard."""
+    query = update.callback_query
+    await query.answer()
+    workflow_filename = query.data.split("wizard_workflow_", 1)[1]
+
+    # Validate workflow file exists
+    workflow_path = os.path.join(WORKFLOW_API_PATH, workflow_filename)
+    if not os.path.exists(workflow_path):
+        await query.edit_message_text(text=f"❌ Workflow file not found: `{workflow_filename}`", parse_mode="Markdown")
+        reset_wizard_state(context)
+        return
+
+    # Store workflow info (always ask for image as all workflows require it)
+    wizard_data = context.user_data.setdefault("wizard_data", {})
+    wizard_data["workflow_file"] = workflow_filename
+    context.user_data["workflow_file"] = workflow_filename  # Also store in context for get_workflow_path
+
+    # Update message and proceed to image step (all workflows require an image)
+    await query.edit_message_text(text=f"✅ Workflow selected: `{workflow_filename}`", parse_mode="Markdown")
+    context.user_data["wizard_step"] = WIZARD_STEPS["image"]
+    await query.message.reply_text(
+        "Step 2/6: Please upload an image."
+    )
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1439,7 +1481,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["wizard_step"] = WIZARD_STEPS["prompt"]
             await update.message.reply_text(
                 "✅ Image received.\n"
-                "Step 2/5: Send your full story prompt/dialogue text."
+                "Step 3/6: Send your story prompt/dialogue text."
             )
         except Exception as error:
             await update.message.reply_text(f"❌ Failed to save image: {error}")
@@ -1639,9 +1681,15 @@ async def check_vitals_and_alert(context: ContextTypes.DEFAULT_TYPE):
         logging.warning(f"[Alerts] Check failed: {error}")
 
 
+async def on_startup_main(app: ApplicationBuilder) -> None:
+    me = await app.bot.get_me()
+    logging.info(f"[Telegram] Main bot identity: @{me.username} (id={me.id})")
+    logging.info(f"[Telegram] Admin chat id: {ADMIN_CHAT_ID}")
+
+
 # --- 6. MAIN ---
 if __name__ == "__main__":
-    logging.info("🤖 OpenClaw Bridge is starting...")
+    logging.info("OpenClaw Bridge is starting...")
 
     if not BOT_TOKEN:
         raise RuntimeError("Missing BOT_TOKEN environment variable. Set BOT_TOKEN before running telegram_gate.py")
@@ -1650,7 +1698,7 @@ if __name__ == "__main__":
     ws_thread.start()
     logging.info("[ComfyUI-WS] Listener thread started")
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup_main).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("begin", begin_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
@@ -1661,6 +1709,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("story", handle_story))
+    app.add_handler(CallbackQueryHandler(wizard_workflow_callback, pattern="^wizard_workflow_"))
     app.add_handler(CallbackQueryHandler(workflow_button_callback, pattern="^workflow_"))
     app.add_handler(MessageHandler(filters.PHOTO, handle_message))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
